@@ -1,0 +1,906 @@
+{% extends 'ebooks/base.html' %}
+
+{% block title %}{{ ebook.title }} - PDF to Audiobook{% endblock %}
+
+{% block content %}
+
+<!-- Header -->
+<div class="row mb-4">
+    <div class="col-12">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="{% url 'ebook_list' %}">Library</a></li>
+                <li class="breadcrumb-item active">{{ ebook.title|truncatechars:30 }}</li>
+            </ol>
+        </nav>
+
+        <div class="d-flex justify-content-between align-items-start">
+            <div>
+                <h2><i class="bi bi-file-pdf text-danger"></i> {{ ebook.title }}</h2>
+                <div class="mb-2">
+                    {% if ebook.processing_status == 'completed' %}
+                        <span class="badge bg-success">
+                            <i class="bi bi-check-circle"></i> Processing Complete
+                        </span>
+                    {% elif ebook.processing_status == 'processing' %}
+                        <span class="badge bg-warning" id="statusBadge">
+                            <i class="bi bi-hourglass-split"></i> Processing...
+                        </span>
+                    {% elif ebook.processing_status == 'failed' %}
+                        <span class="badge bg-danger">
+                            <i class="bi bi-exclamation-triangle"></i> Processing Failed
+                        </span>
+                    {% else %}
+                        <span class="badge bg-info">
+                            <i class="bi bi-upload"></i> Uploaded
+                        </span>
+                    {% endif %}
+                </div>
+                <p class="text-muted">
+                    <i class="bi bi-calendar"></i> Uploaded: {{ ebook.upload_date|date:"F d, Y \a\t H:i" }}
+                </p>
+                <p class="text-muted">
+                    <i class="bi bi-mic"></i> Voice: {{ ebook.get_voice_style_display }} ({{ ebook.get_accent_display }})
+                </p>
+            </div>
+
+            <div class="btn-group">
+                {% if ebook.audio_file %}
+                    <a href="{{ ebook.audio_file.url }}" class="btn btn-outline-success" download>
+                        <i class="bi bi-download"></i> Download Audio
+                    </a>
+                {% endif %}
+                <button type="button" class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#uploadBackgroundModal">
+                    <i class="bi bi-upload"></i> Upload Background
+                </button>
+                <button type="button" class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#deleteModal">
+                    <i class="bi bi-trash"></i> Delete Ebook
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Regenerate Audio Section -->
+{% if ebook.processing_status == 'completed' or ebook.audio_file %}
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-arrow-repeat"></i> Regenerate Audio</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">Change the voice style or accent and regenerate the audiobook.</p>
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="{{ regenerate_form.voice_style.id_for_label }}" class="form-label">Voice Style</label>
+                            {{ regenerate_form.voice_style }}
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="{{ regenerate_form.accent.id_for_label }}" class="form-label">Accent</label>
+                            {{ regenerate_form.accent }}
+                        </div>
+                    </div>
+                    <button type="submit" name="regenerate" class="btn btn-primary">
+                        <i class="bi bi-arrow-repeat"></i> Regenerate Audio
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Content Tabs -->
+<ul class="nav nav-tabs" id="contentTabs" role="tablist">
+    {% if ebook.pdf_file %}
+    <li class="nav-item" role="presentation">
+        <button class="nav-link{% if not ebook.audio_file or not ebook.lyrics %} active{% endif %}" id="pdf-tab" data-bs-toggle="tab" data-bs-target="#pdf-content" type="button">
+            <i class="bi bi-file-pdf"></i> PDF Viewer
+        </button>
+    </li>
+    {% endif %}
+    {% if ebook.audio_file %}
+    <li class="nav-item" role="presentation">
+        <button class="nav-link{% if ebook.lyrics %} active{% endif %}" id="audio-tab" data-bs-toggle="tab" data-bs-target="#audio-content" type="button">
+            <i class="bi bi-volume-up"></i> Audiobook
+        </button>
+    </li>
+    {% endif %}
+    {% if ebook.extracted_text %}
+    <li class="nav-item" role="presentation">
+        <button class="nav-link{% if not ebook.pdf_file and not ebook.audio_file %} active{% endif %}" id="text-tab" data-bs-toggle="tab" data-bs-target="#text-content" type="button">
+            <i class="bi bi-file-text"></i> Extracted Text
+        </button>
+    </li>
+    {% endif %}
+</ul>
+
+<div class="tab-content mt-3" id="contentTabsContent">
+    <!-- PDF Viewer Tab -->
+    {% if ebook.pdf_file %}
+    <div class="tab-pane fade{% if not ebook.audio_file or not ebook.lyrics %} show active{% endif %}" id="pdf-content">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-file-pdf"></i> PDF Document</h5>
+                <div class="btn-group btn-group-sm">
+                    <button class="btn btn-outline-secondary" id="prevPage">
+                        <i class="bi bi-chevron-left"></i> Previous
+                    </button>
+                    <span class="btn btn-outline-secondary" id="pageInfo">Page 1 of 1</span>
+                    <button class="btn btn-outline-secondary" id="nextPage">
+                        <i class="bi bi-chevron-right"></i> Next
+                    </button>
+                </div>
+            </div>
+            <div class="card-body text-center">
+                <canvas id="pdf-canvas" class="pdf-canvas"></canvas>
+                <div id="pdf-loading" class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading PDF...</span>
+                    </div>
+                    <p class="mt-2">Loading PDF document...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Audio Tab -->
+    {% if ebook.audio_file %}
+    <div class="tab-pane fade{% if ebook.lyrics %} show active{% endif %}" id="audio-content">
+        <div class="audio-player-container">
+            <div class="animated-background" {% if ebook.background_animation %}style="background-image: url({{ ebook.background_animation.url }}); background-size: cover; background-position: center; background-repeat: no-repeat;"{% else %}style="background: linear-gradient(45deg, #667eea 0%, #764ba2 100%); background-size: 400% 400%; animation: gradientShift 15s ease infinite;"{% endif %}></div>
+            <div class="lyrics-overlay">
+                {% if ebook.lyrics %}
+                <div id="lyrics-display" class="lyrics-display">
+                    {% for lyric in ebook.lyrics %}
+                    <div class="lyric-line" data-time="{{ lyric.time }}">
+                        {{ lyric.text }}
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="no-lyrics">
+                    <i class="bi bi-music-note"></i>
+                    <p>No lyrics available for this audiobook</p>
+                </div>
+                {% endif %}
+            </div>
+            <div class="audio-controls">
+                <audio controls class="w-100" id="audioPlayer">
+                    <source src="{{ ebook.audio_file.url }}" type="audio/mpeg">
+                    Your browser does not support the audio element.
+                </audio>
+                <div class="text-center text-muted mt-2">
+                    <small>
+                        <i class="bi bi-info-circle"></i>
+                        Generated using text-to-speech technology
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Text Tab -->
+    {% if ebook.extracted_text %}
+    <div class="tab-pane fade" id="text-content">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-file-text"></i> Extracted Text</h5>
+            </div>
+            <div class="card-body">
+                <div style="max-height: 500px; overflow-y: auto;">
+                    <pre class="text-wrap">{{ ebook.extracted_text|truncatewords:500 }}</pre>
+                </div>
+                {% if ebook.extracted_text|length > 2000 %}
+                <div class="text-center mt-3">
+                    <small class="text-muted">Text truncated for display. Full text is used for audio generation.</small>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Hidden element for JS variables -->
+<div id="js-vars" data-processing="{% if ebook.processing_status == 'processing' %}true{% else %}false{% endif %}" data-has-pdf="{% if ebook.pdf_file %}true{% else %}false{% endif %}"{% if ebook.pdf_file %} data-pdf-url="{{ ebook.pdf_file.url }}"{% endif %} style="display: none;"></div>
+
+<!-- Processing Status (for ongoing processing) -->
+{% if ebook.processing_status == 'processing' %}
+<div class="alert alert-info mt-4" id="processingAlert">
+    <div class="d-flex align-items-center">
+        <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+        <div>
+            <strong>Processing in progress...</strong>
+            We're extracting text and generating audio. This page will update automatically.
+        </div>
+    </div>
+    <div class="progress mt-2">
+        <div class="progress-bar" role="progressbar" style="width: 0%" id="progressBar">0%</div>
+    </div>
+</div>
+{% endif %}
+<!-- Delete Ebook Modal -->
+<div class="modal fade" id="deleteModal" tabindex="-1" aria-labelledby="deleteModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="deleteModalLabel">
+                    <i class="bi bi-exclamation-triangle text-warning"></i> Delete Ebook
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to delete the ebook <strong>"{{ ebook.title }}"</strong>?</p>
+                <div class="alert alert-danger">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <strong>Warning:</strong> This action cannot be undone. The ebook and all associated files will be permanently removed from the server.
+                </div>
+                {% if ebook.pdf_file %}
+                <p class="mb-1"><i class="bi bi-file-pdf"></i> PDF file will be deleted</p>
+                {% endif %}
+                {% if ebook.audio_file %}
+                <p class="mb-1"><i class="bi bi-volume-up"></i> Audio file will be deleted</p>
+                {% endif %}
+                {% if ebook.extracted_text %}
+                <p class="mb-1"><i class="bi bi-file-text"></i> Extracted text will be deleted</p>
+                {% endif %}
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <form method="post" action="{% url 'delete_ebook' ebook.pk %}" style="display: inline;">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-danger">
+                        <i class="bi bi-trash"></i> Delete Ebook
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Upload Background Modal -->
+<div class="modal fade" id="uploadBackgroundModal" tabindex="-1" aria-labelledby="uploadBackgroundModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="uploadBackgroundModalLabel">
+                    <i class="bi bi-upload"></i> Upload Background Files
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted mb-3">Add background animation and/or voice to enhance your audiobook experience.</p>
+                <form method="post" enctype="multipart/form-data" id="backgroundUploadForm">
+                    {% csrf_token %}
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="id_background_animation" class="form-label">
+                                <i class="bi bi-images"></i> Background Animation
+                            </label>
+                            <input type="file" name="background_animation" accept="image/*,video/*" id="id_background_animation" class="form-control">
+                            <div class="form-text">
+                                <i class="bi bi-info-circle"></i>
+                                Upload an image or video for custom background. Supported: PNG, JPG, GIF, MP4, WebM
+                            </div>
+                            {% if ebook.background_animation %}
+                            <div class="mt-2">
+                                <small class="text-success">
+                                    <i class="bi bi-check-circle"></i> Current: {{ ebook.background_animation.name|truncatechars:30 }}
+                                </small>
+                            </div>
+                            {% endif %}
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="id_background_voice" class="form-label">
+                                <i class="bi bi-music-note"></i> Background Voice/Audio
+                            </label>
+                            <input type="file" name="background_voice" accept="audio/*" id="id_background_voice" class="form-control">
+                            <div class="form-text">
+                                <i class="bi bi-info-circle"></i>
+                                Upload background music or voice. Supported: MP3, WAV, OGG
+                            </div>
+                            {% if ebook.background_voice %}
+                            <div class="mt-2">
+                                <small class="text-success">
+                                    <i class="bi bi-check-circle"></i> Current: {{ ebook.background_voice.name|truncatechars:30 }}
+                                </small>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="text-end">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" name="upload_background" class="btn btn-primary">
+                            <i class="bi bi-upload"></i> Upload Files
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<style>
+/* Security measures to prevent screenshots and unauthorized copying */
+body {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-user-drag: none;
+    -khtml-user-drag: none;
+    -moz-user-drag: none;
+    -o-user-drag: none;
+}
+
+/* Prevent right-click context menu */
+body {
+    -webkit-touch-callout: none;
+}
+
+.pdf-canvas {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    pointer-events: none; /* Prevent interaction with PDF canvas */
+}
+
+/* Add subtle watermark overlay */
+#pdf-content::before {
+    content: "Protected Content - Screenshot Not Allowed";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) rotate(-45deg);
+    font-size: 24px;
+    color: rgba(255, 0, 0, 0.1);
+    z-index: 10;
+    pointer-events: none;
+    font-weight: bold;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* Screenshot detection - content that appears in screenshots but not on screen */
+@media screen and (max-width: 0px) {
+    body::before {
+        content: "⚠️ SCREENSHOT DETECTED - UNAUTHORIZED COPY ⚠️";
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(255, 0, 0, 0.8);
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 48px;
+        font-weight: bold;
+        text-align: center;
+        z-index: 999998;
+        pointer-events: none;
+    }
+}
+
+/* Print prevention */
+@media print {
+    body * {
+        display: none !important;
+    }
+
+    body::before {
+        content: "🚫 PRINTING NOT ALLOWED - SECURITY VIOLATION 🚫\A This document is protected and cannot be printed.";
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
+        background: black !important;
+        color: red !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        font-size: 36px !important;
+        font-weight: bold !important;
+        text-align: center !important;
+        white-space: pre-line !important;
+        z-index: 999999 !important;
+        padding: 20px !important;
+        box-sizing: border-box !important;
+    }
+}
+.audio-player-container {
+    position: relative;
+    min-height: 600px;
+    overflow: hidden;
+    border-radius: 0.5rem;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.animated-background {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1;
+}
+
+.animated-background::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-image:
+        radial-gradient(circle at 20% 80%, rgba(255,255,255,0.1) 0%, transparent 50%),
+        radial-gradient(circle at 80% 20%, rgba(255,255,255,0.1) 0%, transparent 50%),
+        radial-gradient(circle at 40% 40%, rgba(255,255,255,0.1) 0%, transparent 50%);
+    background-size: 100px 100px, 150px 150px, 200px 200px;
+    animation: floatParticles 20s linear infinite;
+    z-index: 2;
+}
+
+@keyframes gradientShift {
+    0% {
+        background-position: 0% 50%;
+    }
+    50% {
+        background-position: 100% 50%;
+    }
+    100% {
+        background-position: 0% 50%;
+    }
+}
+
+@keyframes floatParticles {
+    0% {
+        transform: translateY(100vh) rotate(0deg);
+    }
+    100% {
+        transform: translateY(-100vh) rotate(360deg);
+    }
+}
+
+.lyrics-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+    padding: 2rem;
+}
+
+.lyrics-display {
+    text-align: center;
+    font-family: 'Georgia', serif;
+    line-height: 1.8;
+    max-width: 800px;
+    width: 100%;
+    max-height: 400px;
+    overflow: auto;
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE and Edge */
+}
+.lyrics-display::-webkit-scrollbar {
+    display: none; /* Chrome, Safari, Opera */
+}
+
+.lyric-line {
+    padding: 0.75rem 0;
+    transition: all 0.5s ease;
+    font-size: 1.2rem;
+    color: #666666;
+}
+
+.lyric-line.active {
+    color: #000000;
+    font-weight: bold;
+    font-size: 1.5rem;
+    transform: scale(1.08);
+}
+
+.lyric-line.upcoming {
+    color: #999999;
+    font-size: 1.1rem;
+}
+
+.no-lyrics {
+    text-align: center;
+    color: #666666;
+    font-size: 1.5rem;
+}
+
+.no-lyrics i {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    display: block;
+    color: #999999;
+}
+
+.audio-controls {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    background: rgba(255, 255, 255, 0.9);
+    padding: 1rem;
+    z-index: 3;
+    border-top: 1px solid #e0e0e0;
+}
+
+.audio-controls audio {
+    background: rgba(0, 0, 0, 0.05);
+    border-radius: 0.5rem;
+}
+</style>
+
+<script>
+// Security measures to prevent screenshots and unauthorized copying
+document.addEventListener('contextmenu', function(e) {
+    e.preventDefault();
+    return false;
+});
+
+document.addEventListener('keydown', function(e) {
+    // Prevent Print Screen
+    if (e.key === 'PrintScreen') {
+        e.preventDefault();
+        showScreenshotWarning();
+        return false;
+    }
+    // Prevent Ctrl+P (Print)
+    if (e.ctrlKey && e.key === 'p') {
+        e.preventDefault();
+        showScreenshotWarning();
+        return false;
+    }
+    // Prevent Ctrl+Shift+I (Dev Tools)
+    if (e.ctrlKey && e.shiftKey && e.key === 'I') {
+        e.preventDefault();
+        return false;
+    }
+    // Prevent Ctrl+U (View Source)
+    if (e.ctrlKey && e.key === 'u') {
+        e.preventDefault();
+        return false;
+    }
+    // Prevent F12 (Dev Tools)
+    if (e.key === 'F12') {
+        e.preventDefault();
+        return false;
+    }
+    // Prevent Windows+Shift+S (Snipping Tool)
+    if (e.shiftKey && e.key === 'S' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        showScreenshotWarning();
+        return false;
+    }
+});
+
+// Prevent printing via beforeprint event
+window.addEventListener('beforeprint', function(e) {
+    e.preventDefault();
+    showScreenshotWarning();
+    return false;
+});
+
+// Screenshot detection using visibility change
+document.addEventListener('visibilitychange', function() {
+    if (document.hidden) {
+        // Page became hidden - possible screenshot attempt
+        setTimeout(function() {
+            if (document.hidden) {
+                showScreenshotWarning();
+            }
+        }, 100);
+    }
+});
+
+// Monitor for window resize (possible screenshot tools)
+let lastWidth = window.innerWidth;
+let lastHeight = window.innerHeight;
+setInterval(function() {
+    if (window.innerWidth !== lastWidth || window.innerHeight !== lastHeight) {
+        // Window size changed - possible screenshot tool opened
+        showScreenshotWarning();
+        lastWidth = window.innerWidth;
+        lastHeight = window.innerHeight;
+    }
+}, 1000);
+
+// Prevent copy/paste
+document.addEventListener('copy', function(e) {
+    e.preventDefault();
+    showScreenshotWarning();
+    return false;
+});
+
+document.addEventListener('paste', function(e) {
+    e.preventDefault();
+    showScreenshotWarning();
+    return false;
+});
+
+// Prevent drag and drop
+document.addEventListener('dragstart', function(e) {
+    e.preventDefault();
+    return false;
+});
+
+// Prevent selection
+document.addEventListener('selectstart', function(e) {
+    e.preventDefault();
+    return false;
+});
+
+// Function to show screenshot warning
+function showScreenshotWarning() {
+    // Log the incident (client-side logging)
+    console.log('Screenshot attempt detected and logged:', new Date().toISOString());
+
+    const overlay = document.createElement('div');
+    overlay.id = 'screenshot-overlay';
+    overlay.innerHTML = `
+        <div style="
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 0, 0, 0.9);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 999999;
+            font-size: 48px;
+            font-weight: bold;
+            text-align: center;
+            pointer-events: none;
+        ">
+            <div>
+                <div style="font-size: 72px; margin-bottom: 20px;">🚫</div>
+                <div>SCREENSHOT DETECTED</div>
+                <div style="font-size: 24px; margin-top: 20px;">This action is not allowed</div>
+                <div style="font-size: 18px; margin-top: 10px;">This incident has been logged. Further attempts may result in account suspension.</div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    // Remove overlay after 5 seconds
+    setTimeout(function() {
+        if (overlay.parentNode) {
+            overlay.parentNode.removeChild(overlay);
+        }
+    }, 5000);
+}
+
+const isProcessing = document.getElementById('js-vars').dataset.processing === 'true';
+const hasPdf = document.getElementById('js-vars').dataset.hasPdf === 'true';
+const pdfUrl = document.getElementById('js-vars').dataset.pdfUrl;
+
+let pdfDoc = null;
+let pageNum = 1;
+let pageRendering = false;
+let pageNumPending = null;
+const scale = 1.2;
+const canvas = document.getElementById('pdf-canvas');
+const ctx = canvas.getContext('2d');
+
+// PDF.js setup
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+const statusUrl = '{% url "check_status" ebook.pk %}';
+
+// Load PDF
+function loadPDF() {
+    if (hasPdf && pdfUrl) {
+        const loadingTask = pdfjsLib.getDocument(pdfUrl);
+        loadingTask.promise.then(function(pdf) {
+            pdfDoc = pdf;
+            document.getElementById('pageInfo').textContent = `Page ${pageNum} of ${pdf.numPages}`;
+            renderPage(pageNum);
+            document.getElementById('pdf-loading').style.display = 'none';
+
+            // Enable/disable navigation buttons
+            document.getElementById('prevPage').disabled = pageNum <= 1;
+            document.getElementById('nextPage').disabled = pageNum >= pdf.numPages;
+        }).catch(function(error) {
+            console.error('Error loading PDF:', error);
+            document.getElementById('pdf-loading').innerHTML =
+                '<div class="alert alert-danger">Error loading PDF document</div>';
+        });
+    } else {
+        document.getElementById('pdf-loading').innerHTML =
+            '<div class="alert alert-info">PDF file has been deleted</div>';
+    }
+}
+
+// Render page
+function renderPage(num) {
+    pageRendering = true;
+    pdfDoc.getPage(num).then(function(page) {
+        const viewport = page.getViewport({scale: scale});
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+
+        const renderContext = {
+            canvasContext: ctx,
+            viewport: viewport
+        };
+        
+        const renderTask = page.render(renderContext);
+        renderTask.promise.then(function() {
+            pageRendering = false;
+            if (pageNumPending !== null) {
+                renderPage(pageNumPending);
+                pageNumPending = null;
+            }
+        });
+    });
+
+    document.getElementById('pageInfo').textContent = `Page ${num} of ${pdfDoc.numPages}`;
+    document.getElementById('prevPage').disabled = num <= 1;
+    document.getElementById('nextPage').disabled = num >= pdfDoc.numPages;
+}
+
+// Queue render page
+function queueRenderPage(num) {
+    if (pageRendering) {
+        pageNumPending = num;
+    } else {
+        renderPage(num);
+    }
+}
+
+// Previous page
+document.getElementById('prevPage').addEventListener('click', function() {
+    if (pageNum <= 1) return;
+    pageNum--;
+    queueRenderPage(pageNum);
+});
+
+// Next page
+document.getElementById('nextPage').addEventListener('click', function() {
+    if (pageNum >= pdfDoc.numPages) return;
+    pageNum++;
+    queueRenderPage(pageNum);
+});
+
+// Load PDF on page load
+document.addEventListener('DOMContentLoaded', function() {
+    if (hasPdf) {
+        loadPDF();
+    } else {
+        document.getElementById('pdf-loading').innerHTML =
+            '<div class="alert alert-info">PDF file has been deleted</div>';
+    }
+
+    // Check processing status periodically
+    if (isProcessing) {
+        const statusInterval = setInterval(function() {
+            fetch(statusUrl)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status !== 'processing') {
+                        clearInterval(statusInterval);
+                        location.reload(); // Reload to show updated content
+                    } else {
+                        // Update progress bar
+                        const progressBar = document.getElementById('progressBar');
+                        if (progressBar) {
+                            progressBar.style.width = data.progress + '%';
+                            progressBar.textContent = data.progress + '%';
+                        }
+                    }
+                })
+                .catch(error => console.error('Error checking status:', error));
+        }, 2000); // Check every 2 seconds
+    }
+});
+
+// Lyrics synchronization
+let currentLyricIndex = -1;
+const lyricLines = document.querySelectorAll('.lyric-line');
+const audioPlayer = document.getElementById('audioPlayer');
+
+function updateLyrics() {
+    if (!audioPlayer || !lyricLines.length) return;
+
+    const currentTime = audioPlayer.currentTime;
+
+    // Find the current lyric
+    let newIndex = -1;
+    for (let i = 0; i < lyricLines.length; i++) {
+        const time = parseFloat(lyricLines[i].dataset.time);
+        if (time <= currentTime) {
+            newIndex = i;
+        } else {
+            break;
+        }
+    }
+
+    // Update highlighting
+    if (newIndex !== currentLyricIndex) {
+        // Remove previous active class
+        if (currentLyricIndex >= 0) {
+            lyricLines[currentLyricIndex].classList.remove('active');
+        }
+
+        // Add active class to current
+        if (newIndex >= 0) {
+            lyricLines[newIndex].classList.add('active');
+            // Scroll to current lyric
+            lyricLines[newIndex].scrollIntoView({
+                behavior: 'smooth',
+                block: 'center'
+            });
+        }
+
+        currentLyricIndex = newIndex;
+    }
+
+    // Highlight upcoming lyrics
+    lyricLines.forEach((line, index) => {
+        const time = parseFloat(line.dataset.time);
+        if (time > currentTime && time <= currentTime + 3) {
+            line.classList.add('upcoming');
+        } else if (time > currentTime + 3) {
+            line.classList.remove('upcoming');
+        }
+    });
+}
+
+// Sound effect function
+function playBeep() {
+    try {
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+
+        oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+        oscillator.type = 'sine';
+
+        gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+
+        oscillator.start(audioContext.currentTime);
+        oscillator.stop(audioContext.currentTime + 0.5);
+    } catch (e) {
+        console.log('Sound effect not supported');
+    }
+}
+
+// Add event listeners for audio player
+if (audioPlayer) {
+    audioPlayer.addEventListener('timeupdate', updateLyrics);
+    audioPlayer.addEventListener('play', () => {
+        // Reset to beginning if needed
+        updateLyrics();
+        // Play sound effect
+        playBeep();
+    });
+    audioPlayer.addEventListener('seeked', updateLyrics);
+}
+</script>
+{% endblock %}

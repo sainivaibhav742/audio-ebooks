@@ -1,0 +1,159 @@
+{% extends 'ebooks/base.html' %}
+
+{% block title %}My Library - PDF to Audiobook{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-collection"></i> My PDF Library</h2>
+    <a href="{% url 'upload_ebook' %}" class="btn btn-primary">
+        <i class="bi bi-plus-circle"></i> Upload New PDF
+    </a>
+</div>
+
+{% if ebooks %}
+    <div class="row">
+        {% for ebook in ebooks %}
+            <div class="col-md-6 col-lg-4 mb-4">
+                <div class="card h-100 shadow-sm position-relative">
+                    <button type="button" class="btn btn-danger btn-sm position-absolute top-0 end-0 m-2" data-bs-toggle="modal" data-bs-target="#deleteModal{{ ebook.pk }}" title="Delete Ebook" style="z-index: 10;">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                    <div class="card-body">
+                        <h5 class="card-title">
+                            <i class="bi bi-file-pdf text-danger"></i>
+                            {{ ebook.title|truncatechars:30 }}
+                        </h5>
+                        
+                        <div class="mb-3">
+                            {% if ebook.processing_status == 'completed' %}
+                                <span class="badge bg-success status-badge">
+                                    <i class="bi bi-check-circle"></i> Completed
+                                </span>
+                            {% elif ebook.processing_status == 'processing' %}
+                                <span class="badge bg-warning status-badge">
+                                    <i class="bi bi-hourglass-split"></i> Processing
+                                </span>
+                            {% elif ebook.processing_status == 'failed' %}
+                                <span class="badge bg-danger status-badge">
+                                    <i class="bi bi-exclamation-triangle"></i> Failed
+                                </span>
+                            {% else %}
+                                <span class="badge bg-info status-badge">
+                                    <i class="bi bi-upload"></i> Uploaded
+                                </span>
+                            {% endif %}
+                        </div>
+                        
+                        <p class="card-text text-muted small">
+                            <i class="bi bi-calendar"></i> 
+                            Uploaded: {{ ebook.upload_date|date:"M d, Y H:i" }}
+                        </p>
+                        <p class="card-text text-muted small">
+                            <i class="bi bi-mic"></i> 
+                            {{ ebook.get_voice_style_display }}
+                        </p>
+                        
+                        {% if ebook.audio_file %}
+                            <p class="card-text text-success small">
+                                <i class="bi bi-volume-up"></i> Audio available
+                            </p>
+                        {% endif %}
+                    </div>
+
+                    <div class="card-footer bg-transparent">
+                        <div class="d-grid">
+                            <a href="{% url 'ebook_detail' ebook.pk %}" class="btn btn-outline-primary">
+                                <i class="bi bi-eye"></i> View Details
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+{% else %}
+    <div class="text-center py-5">
+        <div class="mb-4">
+            <i class="bi bi-inbox display-1 text-muted"></i>
+        </div>
+        <h4 class="text-muted">No PDFs uploaded yet</h4>
+        <p class="text-muted mb-4">
+            Start by uploading your first PDF to convert it to an audiobook.
+        </p>
+        <a href="{% url 'upload_ebook' %}" class="btn btn-primary btn-lg">
+            <i class="bi bi-upload"></i> Upload Your First PDF
+        </a>
+    </div>
+{% endif %}
+
+<!-- Statistics Card -->
+{% if ebooks %}
+<div class="row mt-5">
+    <div class="col-12">
+        <div class="card bg-light">
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-md-3">
+                        <h5 class="text-primary">{{ ebooks|length }}</h5>
+                        <small class="text-muted">Total PDFs</small>
+                    </div>
+                    <div class="col-md-3">
+                        <h5 class="text-success">{{ ebooks|length }}</h5>
+                        <small class="text-muted">Completed</small>
+                    </div>
+                    <div class="col-md-3">
+                        <h5 class="text-warning">0</h5>
+                        <small class="text-muted">Processing</small>
+                    </div>
+                    <div class="col-md-3">
+                        <h5 class="text-info">{{ ebooks|length }}</h5>
+                        <small class="text-muted">With Audio</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Delete Ebook Modals -->
+{% for ebook in ebooks %}
+<div class="modal fade" id="deleteModal{{ ebook.pk }}" tabindex="-1" aria-labelledby="deleteModalLabel{{ ebook.pk }}" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="deleteModalLabel{{ ebook.pk }}">
+                    <i class="bi bi-exclamation-triangle text-warning"></i> Delete Ebook
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to delete the ebook <strong>"{{ ebook.title }}"</strong>?</p>
+                <div class="alert alert-danger">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <strong>Warning:</strong> This action cannot be undone. The ebook and all associated files (PDF and audio) will be permanently removed from the server.
+                </div>
+                {% if ebook.pdf_file %}
+                <p class="mb-1"><i class="bi bi-file-pdf"></i> PDF file will be deleted</p>
+                {% endif %}
+                {% if ebook.audio_file %}
+                <p class="mb-1"><i class="bi bi-volume-up"></i> Audio file will be deleted</p>
+                {% endif %}
+                {% if ebook.extracted_text %}
+                <p class="mb-1"><i class="bi bi-file-text"></i> Extracted text will be deleted</p>
+                {% endif %}
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <form method="post" action="{% url 'delete_ebook' ebook.pk %}" style="display: inline;">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-danger">
+                        <i class="bi bi-trash"></i> Delete Ebook
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endfor %}
+{% endblock %}
